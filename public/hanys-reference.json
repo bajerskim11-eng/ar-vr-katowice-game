@@ -1,0 +1,1 @@
+{"name":"Hanys","source":"Shopify","referenceImage":"https://cdn.shopify.com/s/files/1/1019/1903/1622/files/hanys-reference.jpg?v=1787835565","pipeline":{"stage":"image-to-3d","model":"TripoSR","output":"GLB"},"note":"Reference image for generating the real Hanys 3D character."}
