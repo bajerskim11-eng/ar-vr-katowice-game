@@ -59,11 +59,11 @@ export async function runAgent(input: string, history: { role: 'user' | 'assista
   const model = process.env.OPENROUTER_MODEL || 'openrouter/free';
   const result = await callModel({
     model,
-    messages: [
-      { role: 'system', content: system },
+    input: [
       ...history,
       { role: 'user', content: input },
     ],
+    instructions: system,
     tools: [memoryTool, recallTool],
     stopWhen: stepCountIs(8),
   });
