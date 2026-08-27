@@ -1,0 +1,60 @@
+name: Generate Hanys 3D
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/triposr_colab.py'
+      - '.github/workflows/generate-hanys-3d.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0 git-lfs
+
+      - name: Clone TripoSR
+        run: git clone --depth 1 https://github.com/VAST-AI-Research/TripoSR.git /tmp/TripoSR
+
+      - name: Install TripoSR CPU dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r /tmp/TripoSR/requirements.txt
+
+      - name: Generate Hanys GLB
+        env:
+          HF_HOME: /tmp/hf-cache
+        run: |
+          mkdir -p public/models/hanys
+          curl -L --fail 'https://cdn.shopify.com/s/files/1/1019/1903/1622/files/hanys.jpg?v=1787742427' -o /tmp/hanys.jpg
+          python /tmp/TripoSR/run.py /tmp/hanys.jpg \
+            --device cpu \
+            --output-dir /tmp/hanys-output \
+            --model-save-format glb \
+            --mc-resolution 128 \
+            --chunk-size 2048
+          cp /tmp/hanys-output/0/mesh.glb public/models/hanys/hanys.glb
+          ls -lh public/models/hanys/hanys.glb
+
+      - name: Commit generated model
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/models/hanys/hanys.glb
+          git diff --cached --quiet && exit 0
+          git commit -m 'feat: generate Hanys 3D GLB from Shopify reference'
+          git push
