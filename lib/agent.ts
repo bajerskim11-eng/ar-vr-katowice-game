@@ -60,16 +60,18 @@ export async function runAgent(input: string, history: HistoryMessage[] = []) {
 
   const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
   const model = process.env.OPENROUTER_MODEL || 'openrouter/free';
+  const context = history.length
+    ? `Kontekst wcześniejszej rozmowy:\n${history.map((m) => `${m.role}: ${m.content}`).join('\n')}`
+    : '';
+
   const result = client.callModel({
     model,
     instructions: system,
-    input: [...history, { role: 'user', content: input }],
+    input: context ? `${context}\n\nNowa wiadomość użytkownika:\n${input}` : input,
     tools: [memoryTool, recallTool],
     stopWhen: [stepCountIs(8)],
   });
 
-  // SDK 0.9.x exposes getText with an over-constrained generated type;
-  // the runtime API is the documented zero-argument method.
   const getText = (result as unknown as { getText: () => Promise<string> }).getText;
   return { text: await getText.call(result), provider: 'openrouter', model };
 }
