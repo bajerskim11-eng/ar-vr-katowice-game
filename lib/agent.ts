@@ -1,11 +1,11 @@
-import { callModel, stepCountIs, tool } from '@openrouter/agent';
+import { OpenRouter, stepCountIs, tool } from '@openrouter/agent';
 import { z } from 'zod';
 
 const memories: string[] = [];
 
 const memoryTool = tool({
   name: 'remember',
-  description: 'Zapisz trwałą w ramach procesu pamięć o użytkowniku, projekcie lub decyzji.',
+  description: 'Zapisz pamięć o użytkowniku, projekcie lub decyzji.',
   inputSchema: z.object({ note: z.string().min(1) }),
   execute: async ({ note }) => {
     memories.push(note);
@@ -19,18 +19,19 @@ const recallTool = tool({
   inputSchema: z.object({ query: z.string().optional() }),
   execute: async ({ query }) => {
     const q = (query ?? '').toLowerCase();
-    const hits = memories.filter((m) => !q || m.toLowerCase().includes(q));
-    return { memories: hits.slice(-20) };
+    return { memories: memories.filter((m) => !q || m.toLowerCase().includes(q)).slice(-20) };
   },
 });
 
 const system = `Jesteś Bebok AI — centralnym agentem orkiestrującym modele i narzędzia.
-Odpowiadasz po polsku. Masz działać praktycznie: rozbijaj zadania na kroki i używaj narzędzi, gdy są potrzebne.
-Masz pamięć przez narzędzia remember/recall. Nie twierdź, że wygenerowałeś plik lub film, jeśli nie wykonałeś narzędzia.
-Architektura jest local-first: preferuj lokalne modele, gdy są dostępne, a OpenRouter traktuj jako router modeli zewnętrznych.
-Docelowe integracje: MCP, ComfyUI, GitHub, web, Shopify i generowanie obrazu/video/audio.`;
+Odpowiadasz po polsku. Działaj praktycznie i rozbijaj zadania na kroki.
+Masz pamięć przez remember/recall. Nie twierdź, że wykonałeś działanie, jeśli narzędzie go nie wykonało.
+Architektura local-first: preferuj lokalne modele, gdy są dostępne, a OpenRouter traktuj jako router modeli zewnętrznych.
+Docelowe integracje: MCP, ComfyUI, GitHub, web, Shopify oraz generowanie obrazu/video/audio.`;
 
-export async function runAgent(input: string, history: { role: 'user' | 'assistant'; content: string }[] = []) {
+type HistoryMessage = { role: 'user' | 'assistant'; content: string };
+
+export async function runAgent(input: string, history: HistoryMessage[] = []) {
   const ollamaUrl = process.env.OLLAMA_BASE_URL;
   const ollamaModel = process.env.OLLAMA_MODEL || 'qwen3:4b';
 
@@ -38,11 +39,11 @@ export async function runAgent(input: string, history: { role: 'user' | 'assista
     const response = await fetch(`${ollamaUrl.replace(/\/$/, '')}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: ollamaModel, stream: false, messages: [
-        { role: 'system', content: system },
-        ...history,
-        { role: 'user', content: input },
-      ] }),
+      body: JSON.stringify({
+        model: ollamaModel,
+        stream: false,
+        messages: [{ role: 'system', content: system }, ...history, { role: 'user', content: input }],
+      }),
     });
     if (!response.ok) throw new Error(`Ollama HTTP ${response.status}`);
     const data = await response.json();
@@ -51,22 +52,24 @@ export async function runAgent(input: string, history: { role: 'user' | 'assista
 
   if (!process.env.OPENROUTER_API_KEY) {
     return {
-      text: 'Agent UI działa. Dodaj OPENROUTER_API_KEY albo uruchom Ollama i ustaw OLLAMA_BASE_URL, aby włączyć model. Nie potrzebujemy płatnego modelu: lokalne Ollama może działać bez tokenów API.',
-      provider: 'demo', model: 'none',
+      text: 'Interfejs agenta działa. Dodaj OPENROUTER_API_KEY albo OLLAMA_BASE_URL, aby włączyć model.',
+      provider: 'demo',
+      model: 'none',
     };
   }
 
+  const client = new OpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
   const model = process.env.OPENROUTER_MODEL || 'openrouter/free';
-  const result = await callModel({
+  const result = client.callModel({
     model,
-    input: [
-      ...history,
-      { role: 'user', content: input },
-    ],
     instructions: system,
+    input: [...history, { role: 'user', content: input }],
     tools: [memoryTool, recallTool],
-    stopWhen: stepCountIs(8),
+    stopWhen: [stepCountIs(8)],
   });
 
-  return { text: await result.getText(), provider: 'openrouter', model };
+  // SDK 0.9.x exposes getText with an over-constrained generated type;
+  // the runtime API is the documented zero-argument method.
+  const getText = (result as unknown as { getText: () => Promise<string> }).getText;
+  return { text: await getText.call(result), provider: 'openrouter', model };
 }
