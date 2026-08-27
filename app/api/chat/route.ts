@@ -1,15 +1,32 @@
 import { NextResponse } from 'next/server';
+import { runAgent } from '@/lib/agent';
+
+export const runtime = 'nodejs';
 
 export async function POST(req: Request) {
-  const { message } = await req.json();
-  if (!message) return NextResponse.json({ error: 'Brak wiadomości' }, { status: 400 });
-  const key = process.env.OPENROUTER_API_KEY;
-  if (!key) return NextResponse.json({ text: 'Interfejs działa. Aby uruchomić prawdziwy model, dodaj OPENROUTER_API_KEY w środowisku. Następnie agent będzie korzystał z openrouter/free, a później dołączymy Ollama i MCP.' });
   try {
-    const r = await fetch('https://openrouter.ai/api/v1/chat/completions', { method:'POST', headers:{'Authorization':`Bearer ${key}`,'Content-Type':'application/json'}, body:JSON.stringify({model:'openrouter/free',messages:[{role:'system',content:'Jesteś centralnym agentem Bebok AI. Odpowiadaj po polsku. Planuj zadania i w kolejnych wersjach korzystaj z narzędzi MCP, pamięci, Ollama i ComfyUI.'},{role:'user',content:message}],temperature:.7})});
-    if(!r.ok) return NextResponse.json({error:`OpenRouter HTTP ${r.status}`},{status:502});
-    const d=await r.json(); return NextResponse.json({text:d.choices?.[0]?.message?.content||'Model nie zwrócił odpowiedzi.'});
-  } catch { return NextResponse.json({error:'Błąd połączenia z modelem.'},{status:502}); }
+    const body = await req.json();
+    const message = typeof body.message === 'string' ? body.message.trim() : '';
+    const history = Array.isArray(body.history)
+      ? body.history.filter((m: any) => (m?.role === 'user' || m?.role === 'assistant') && typeof m?.content === 'string').slice(-12)
+      : [];
+    if (!message) return NextResponse.json({ error: 'Brak wiadomości' }, { status: 400 });
+    const result = await runAgent(message, history);
+    return NextResponse.json(result);
+  } catch (error) {
+    console.error(error);
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Błąd agenta.' }, { status: 502 });
+  }
 }
 
-export async function GET(){return NextResponse.json({ok:true,service:'bebok-ai-agent',openrouter:!!process.env.OPENROUTER_API_KEY,ollama:'planned',mcp:'planned',comfyui:'planned'});}
+export async function GET() {
+  return NextResponse.json({
+    ok: true,
+    service: 'bebok-ai-agent',
+    providers: {
+      openrouter: Boolean(process.env.OPENROUTER_API_KEY),
+      ollama: Boolean(process.env.OLLAMA_BASE_URL),
+    },
+    integrations: { mcp: 'ready-for-connector', comfyui: 'ready-for-mcp', memory: 'enabled' },
+  });
+}
